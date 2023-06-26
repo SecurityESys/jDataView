@@ -18,7 +18,8 @@
     "Vjeux <vjeuxx@gmail.com> (http://blog.vjeux.com/)",
     "RReverser <me@rreverser.com> (http://rreverser.com)"
   ],
-  "main": "src/jdataview.js",
+  "main": "dist/node/jdataview.js",
+  "browser": "dist/browser/jdataview.js",
   "scripts": {
     "test": "grunt"
   },

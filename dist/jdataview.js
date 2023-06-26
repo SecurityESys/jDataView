@@ -1,5 +1,6 @@
 (function (factory) {
-	var global = this;
+	var global = this || window.global || window;
+
 
 	if (NODE || typeof exports === 'object') {
 		module.exports = factory(global);
@@ -18,19 +19,20 @@
 
 'use strict';
 
+
 var compatibility = {
 	// NodeJS Buffer in v0.5.5 and newer
-	NodeBuffer: NODE && 'Buffer' in global,
+	NodeBuffer: 'Buffer' in global,
 	DataView: 'DataView' in global,
 	ArrayBuffer: 'ArrayBuffer' in global,
-	PixelData: BROWSER && 'CanvasPixelArray' in global && !('Uint8ClampedArray' in global) && 'document' in global
+	PixelData: 'CanvasPixelArray' in global && !('Uint8ClampedArray' in global) && 'document' in global
 };
 
 var TextEncoder = global.TextEncoder;
 var TextDecoder = global.TextDecoder;
 
 // we don't want to bother with old Buffer implementation
-if (NODE && compatibility.NodeBuffer) {
+if (compatibility.NodeBuffer) {
 	(function (buffer) {
 		try {
 			buffer.writeFloatLE(Infinity, 0);
@@ -40,7 +42,7 @@ if (NODE && compatibility.NodeBuffer) {
 	})(new Buffer(4));
 }
 
-if (BROWSER && compatibility.PixelData) {
+if (compatibility.PixelData) {
 	var context2d = document.createElement('canvas').getContext('2d');
 	var createPixelData = function (byteLength, buffer) {
 		var data = context2d.createImageData((byteLength + 3) / 4, 1).data;
@@ -97,12 +99,12 @@ function jDataView(buffer, byteOffset, byteLength, littleEndian) {
 
 	// Check parameters and existing functionnalities
 	this._isArrayBuffer = compatibility.ArrayBuffer && is(buffer, ArrayBuffer);
-	this._isPixelData = BROWSER && compatibility.PixelData && is(buffer, CanvasPixelArray);
+	this._isPixelData = compatibility.PixelData && is(buffer, CanvasPixelArray);
 	this._isDataView = compatibility.DataView && this._isArrayBuffer;
-	this._isNodeBuffer = NODE && compatibility.NodeBuffer && Buffer.isBuffer(buffer);
+	this._isNodeBuffer = compatibility.NodeBuffer && Buffer.isBuffer(buffer);
 
 	// Handle Type Errors
-	if (!(NODE && this._isNodeBuffer) && !this._isArrayBuffer && !(BROWSER && this._isPixelData) && !is(buffer, Array)) {
+	if (!this._isNodeBuffer && !this._isArrayBuffer && !this._isPixelData && !is(buffer, Array)) {
 		throw new TypeError('jDataView buffer has an incompatible type');
 	}
 
@@ -126,7 +128,7 @@ function jDataView(buffer, byteOffset, byteLength, littleEndian) {
 	this._engineAction =
 		this._isDataView
 			? this._dataViewAction
-		: (NODE && this._isNodeBuffer)
+		: (this._isNodeBuffer)
 			? this._nodeBufferAction
 		: this._isArrayBuffer
 			? this._arrayBufferAction
@@ -134,7 +136,7 @@ function jDataView(buffer, byteOffset, byteLength, littleEndian) {
 }
 
 function getCharCodes(string) {
-	if (NODE && compatibility.NodeBuffer) {
+	if (compatibility.NodeBuffer) {
 		return new Buffer(string, 'binary');
 	}
 
@@ -151,14 +153,14 @@ function getCharCodes(string) {
 jDataView.wrapBuffer = function (buffer) {
 	switch (typeof buffer) {
 		case 'number':
-			if (NODE && compatibility.NodeBuffer) {
+			if (compatibility.NodeBuffer) {
 				buffer = new Buffer(buffer);
 				buffer.fill(0);
 			} else
 			if (compatibility.ArrayBuffer) {
 				buffer = new Uint8Array(buffer).buffer;
 			} else
-			if (BROWSER && compatibility.PixelData) {
+			if (compatibility.PixelData) {
 				buffer = createPixelData(buffer);
 			} else {
 				buffer = new Array(buffer);
@@ -173,11 +175,11 @@ jDataView.wrapBuffer = function (buffer) {
 			/* falls through */
 		default:
 			if ('length' in buffer && !(
-				(NODE && compatibility.NodeBuffer && Buffer.isBuffer(buffer)) ||
+				(compatibility.NodeBuffer && Buffer.isBuffer(buffer)) ||
 				(compatibility.ArrayBuffer && is(buffer, ArrayBuffer)) ||
-				(BROWSER && compatibility.PixelData && is(buffer, CanvasPixelArray))
+				(compatibility.PixelData && is(buffer, CanvasPixelArray))
 			)) {
-				if (NODE && compatibility.NodeBuffer) {
+				if (compatibility.NodeBuffer) {
 					buffer = new Buffer(buffer);
 				} else
 				if (compatibility.ArrayBuffer) {
@@ -189,7 +191,7 @@ jDataView.wrapBuffer = function (buffer) {
 						}
 					}
 				} else
-				if (BROWSER && compatibility.PixelData) {
+				if (compatibility.PixelData) {
 					buffer = createPixelData(buffer.length, buffer);
 				} else {
 					buffer = arrayFrom(buffer);
@@ -218,14 +220,8 @@ function Uint64(lo, hi) {
 
 jDataView.Uint64 = Uint64;
 
-Uint64.prototype = {
-	valueOf: function () {
-		return this.lo + pow2(32) * this.hi;
-	},
-
-	toString: function () {
-		return Number.prototype.toString.apply(this.valueOf(), arguments);
-	}
+Uint64.prototype.valueOf = function () {
+	return this.lo + pow2(32) * this.hi;
 };
 
 Uint64.fromNumber = function (number) {
@@ -263,6 +259,73 @@ Int64.fromNumber = function (number) {
 	}
 	return new Int64(lo, hi);
 };
+
+// Helper functions for Uint64.prototype.toString
+
+// e.g. 1234 -> [4, 3, 2, 1]
+function numToDigits(num) {
+	var digits = num.toString().split('');
+	for (var i = 0; i < digits.length; i++) {
+		digits[i] = +digits[i];
+	}
+	digits.reverse();
+	return digits;
+}
+
+// Adds two digit arrays, returning the result.
+function add(x, y) {
+	var z = [];
+	var n = Math.max(x.length, y.length);
+	var carry = 0;
+	var i = 0;
+	while (i < n || carry) {
+		var xi = i < x.length ? x[i] : 0;
+		var yi = i < y.length ? y[i] : 0;
+		var zi = carry + xi + yi;
+		z.push(zi % 10);
+		carry = Math.floor(zi / 10);
+		i++;
+	}
+	return z;
+}
+
+// Precise versions of toString() for Int64/Uint64
+
+Uint64.prototype.toString = function() {
+	// Faster toString() for numbers which can be represented precisely as floats.
+	if (this.hi < pow2(19)) {
+		return Number.prototype.toString.apply(this.valueOf(), arguments);
+	}
+
+	// This converts the numbers to base 10 digit arrays for arbitrary precision toString().
+	// See http://www.danvk.org/hex2dec.html
+
+
+	// Compute result = 2^32 * hi + lo
+	var hiArray = numToDigits(this.hi);
+	var loArray = numToDigits(this.lo);
+	for (var i = 0; i < 32; i++) {
+		hiArray = add(hiArray, hiArray, 10);
+	}
+	var result = add(hiArray, loArray, 10);
+
+	var str = '';
+	for (i = result.length - 1; i >= 0; i--) {
+		str += result[i];
+	}
+	return str;
+};
+
+Int64.prototype.toString = function() {
+	if (this.hi < pow2(31)) {
+		return Uint64.prototype.toString.apply(this, arguments);
+	}
+	if (this.hi > pow2(32) - 1 - pow2(19)) {
+		return Number.prototype.toString.apply(this.valueOf(), arguments);
+	}
+	return '-' + new Uint64((pow2(32) - this.lo), (pow2(32) - 1 - this.hi)).toString();
+};
+
 
 var proto = jDataView.prototype = {
 	compatibility: compatibility,
@@ -378,7 +441,7 @@ var proto = jDataView.prototype = {
 			new Uint8Array(this.buffer, byteOffset, length).set(bytes);
 		}
 		else {
-			if (NODE && this._isNodeBuffer) {
+			if (this._isNodeBuffer) {
 				new Buffer(bytes).copy(this.buffer, byteOffset);
 			} else {
 				for (var i = 0; i < length; i++) {
@@ -395,7 +458,7 @@ var proto = jDataView.prototype = {
 	},
 
 	getString: function (byteLength, byteOffset, encoding) {
-		if (NODE && this._isNodeBuffer) {
+		if (this._isNodeBuffer) {
 			byteOffset = defined(byteOffset, this._offset);
 			byteLength = defined(byteLength, this.byteLength - byteOffset);
 
@@ -422,7 +485,7 @@ var proto = jDataView.prototype = {
 	},
 
 	setString: function (byteOffset, subString, encoding) {
-		if (NODE && this._isNodeBuffer) {
+		if (this._isNodeBuffer) {
 			byteOffset = defined(byteOffset, this._offset);
 			this._checkBounds(byteOffset, subString.length);
 			this._offset = byteOffset + this.buffer.write(subString, this.byteOffset + byteOffset, encoding || 'binary');
@@ -739,26 +802,24 @@ var proto = jDataView.prototype = {
 	}
 };
 
-if (NODE) {
-	var nodeNaming = {
-		'Int8': 'Int8',
-		'Int16': 'Int16',
-		'Int32': 'Int32',
-		'Uint8': 'UInt8',
-		'Uint16': 'UInt16',
-		'Uint32': 'UInt32',
-		'Float32': 'Float',
-		'Float64': 'Double'
-	};
+var nodeNaming = {
+	'Int8': 'Int8',
+	'Int16': 'Int16',
+	'Int32': 'Int32',
+	'Uint8': 'UInt8',
+	'Uint16': 'UInt16',
+	'Uint32': 'UInt32',
+	'Float32': 'Float',
+	'Float64': 'Double'
+};
 
-	proto._nodeBufferAction = function (type, isReadAction, byteOffset, littleEndian, value) {
-		// Move the internal offset forward
-		this._offset = byteOffset + dataTypes[type];
-		var nodeName = nodeNaming[type] + ((type === 'Int8' || type === 'Uint8') ? '' : littleEndian ? 'LE' : 'BE');
-		byteOffset += this.byteOffset;
-		return isReadAction ? this.buffer['read' + nodeName](byteOffset) : this.buffer['write' + nodeName](value, byteOffset);
-	};
-}
+proto._nodeBufferAction = function (type, isReadAction, byteOffset, littleEndian, value) {
+	// Move the internal offset forward
+	this._offset = byteOffset + dataTypes[type];
+	var nodeName = nodeNaming[type] + ((type === 'Int8' || type === 'Uint8') ? '' : littleEndian ? 'LE' : 'BE');
+	byteOffset += this.byteOffset;
+	return isReadAction ? this.buffer['read' + nodeName](byteOffset) : this.buffer['write' + nodeName](value, byteOffset);
+};
 
 for (var type in dataTypes) {
 	/* jshint loopfunc: true */
